@@ -23,7 +23,8 @@ using namespace std;
 
 // we will see this an other day hopefully 
 
-const WORD payload_size = 32;
+const WORD MAXIMUM_PAYLOAD_SIZE = 32;
+const char PADDING = ' '; // if the string finish with white space that is padding
 
 
 int send_icmp_packet(PCSTR ip, char payload[]) {
@@ -39,18 +40,15 @@ int send_icmp_packet(PCSTR ip, char payload[]) {
         throw;
     }
 
-    //unsigned char payload[payload_size]{ "whoami" };
-    
-
 
     // Reply buffer
     
-    constexpr DWORD reply_buf_size = sizeof(ICMP_ECHO_REPLY) + payload_size + 8;
+    constexpr DWORD reply_buf_size = sizeof(ICMP_ECHO_REPLY) + MAXIMUM_PAYLOAD_SIZE + 8;
     unsigned char reply_buf[reply_buf_size]{};
 
     // Make the echo request.
     DWORD reply_count = IcmpSendEcho(icmp_handle, dest_ip.S_un.S_addr,
-        payload, payload_size, NULL, reply_buf, reply_buf_size, 10000);
+        payload, MAXIMUM_PAYLOAD_SIZE, NULL, reply_buf, reply_buf_size, 10000);
 
     // Return value of 0 indicates failure, try to get error info.
     if (reply_count == 0) {
@@ -76,7 +74,7 @@ int send_icmp_packet(PCSTR ip, char payload[]) {
 int calculate_split(char original_payload[]) {
     int size = strlen(original_payload); // for now we ignore the null terminator 
 
-    long split = ceil(static_cast<float>(size) / payload_size); // give us the amount of split we will need 
+    long split = ceil(static_cast<float>(size) / MAXIMUM_PAYLOAD_SIZE); // give us the amount of split we will need 
     cout << "String size is : " << size << endl;
     cout << "Amount of split needed : " << split << endl;
 
@@ -86,11 +84,18 @@ int calculate_split(char original_payload[]) {
 
 // Maybe need to reformat to be sur it work but this version 1 should be enough
 char* resized_char(char original_payload[], int split_placement) {
-    int position_placement = split_placement * payload_size;
+    int position_placement = split_placement * MAXIMUM_PAYLOAD_SIZE;
     std::string partial_payload;
+    int length = strlen(original_payload);
 
-    for (short i = 0; i < payload_size; i++) {
-        partial_payload += original_payload[i + position_placement];
+    for (short i = 0; i < MAXIMUM_PAYLOAD_SIZE; i++) {
+        int position = i + position_placement;
+        if (position >= length) {
+            partial_payload += PADDING;
+            continue;
+        }
+
+        partial_payload += original_payload[position];
     }
 
     char* c_partial_payload = new char[partial_payload.length() + 1];
@@ -108,8 +113,9 @@ int main()
     for (int i = 0; i < split_needed; i++) {
         char* value = resized_char(t, i);
         cout << value << "length: " << strlen(value) << endl;
+        send_icmp_packet("127.0.0.1", value);
     }
 
 
-    //send_icmp_packet("127.0.0.1",t);
+   
 }
