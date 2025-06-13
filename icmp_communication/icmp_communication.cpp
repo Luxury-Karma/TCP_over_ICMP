@@ -7,6 +7,8 @@
 #include <cstring>
 #include <thread>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 
 #pragma comment(lib, "Iphlpapi.lib")
 #pragma comment(lib, "Ws2_32.lib")
@@ -23,7 +25,7 @@ using namespace std;
 
 // we will see this an other day hopefully 
 
-const WORD MAXIMUM_PAYLOAD_SIZE = 32;
+const WORD MAXIMUM_PAYLOAD_SIZE = 1;
 const char PADDING = ' '; // if the string finish with white space that is padding
 
 
@@ -48,6 +50,7 @@ uint16_t checksum(uint16_t* buffer, int size) {
     return (uint16_t)(~cksum);
 }
 
+// === Region payload manipulation =====
 
 int calculate_split(char original_payload[]) {
     int size = strlen(original_payload); // for now we ignore the null terminator 
@@ -80,6 +83,33 @@ char* resized_char(char original_payload[], int split_placement) {
 
     return c_partial_payload;
 }
+
+char* check_sum(char payload[]) {
+
+    int sum = 0;
+
+    for (int i = 0; i < sizeof(payload); i++) {
+        sum += (int)(unsigned char)payload[i];
+    }
+    stringstream string_stream;
+    string_stream << hex << uppercase << sum;
+
+    string hex = string_stream.str();
+
+    // make it usable
+    char* c_hex = new char[hex.length() + 1];
+    strcpy_s(c_hex, hex.length() + 1, hex.c_str());
+    
+    
+    return c_hex;
+}
+
+
+
+// ============ 
+
+
+// === Region Networking ===
 
 int send_icmp_raw(const char* target_ip, const char* payload_data) {
 
@@ -195,9 +225,26 @@ void start_icmp_listener() {
 
 }
 
+// ============
 
 int main()
 {
+    // == testing
+
+    char test[] = { "whoami a potato who really like potato for the fun of potato because potato are awsome !222222222222222222222222222222222222222222222222222222222"  };
+
+    cout << strlen(test) << endl;
+
+    cout << check_sum(test) << endl;
+
+    
+    system("pause");
+
+
+
+    // ======
+
+
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         std::cerr << "WSAStartup failed." << std::endl;
