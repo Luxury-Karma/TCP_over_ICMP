@@ -5,7 +5,7 @@
 #include <IcmpAPI.h>
 #include <string>
 #include <cstring>
-
+#include <thread>
 #include <iostream>
 
 #pragma comment(lib, "Iphlpapi.lib")
@@ -27,49 +27,27 @@ const WORD MAXIMUM_PAYLOAD_SIZE = 32;
 const char PADDING = ' '; // if the string finish with white space that is padding
 
 
-int send_icmp_packet(PCSTR ip, char payload[]) {
-    // Create the ICMP context.
-    HANDLE icmp_handle = IcmpCreateFile();
-    if (icmp_handle == INVALID_HANDLE_VALUE) {
-        throw;
+struct ICMPHeader {
+    uint8_t type;
+    uint8_t code;
+    uint16_t checksum;
+    uint16_t id;
+    uint16_t sequence;
+};
+
+// Compute checksum for ICMP packet
+uint16_t checksum(uint16_t* buffer, int size) {
+    uint32_t cksum = 0;
+    while (size > 1) {
+        cksum += *buffer++;
+        size -= 2;
     }
-
-    // Parse the destination IP address.
-    IN_ADDR dest_ip{};
-    if (1 != InetPtonA(AF_INET, ip, &dest_ip)) {
-        throw;
-    }
-
-
-    // Reply buffer
-    
-    constexpr DWORD reply_buf_size = sizeof(ICMP_ECHO_REPLY) + MAXIMUM_PAYLOAD_SIZE + 8;
-    unsigned char reply_buf[reply_buf_size]{};
-
-    // Make the echo request.
-    DWORD reply_count = IcmpSendEcho(icmp_handle, dest_ip.S_un.S_addr,
-        payload, MAXIMUM_PAYLOAD_SIZE, NULL, reply_buf, reply_buf_size, 10000);
-
-    // Return value of 0 indicates failure, try to get error info.
-    if (reply_count == 0) {
-        auto e = GetLastError();
-        DWORD buf_size = 1000;
-        WCHAR buf[1000];
-        GetIpErrorString(e, buf, &buf_size);
-        std::cout << "IcmpSendEcho returned error " << e << " (" << buf << ")" << std::endl;
-        return 255;
-    }
-
-    const ICMP_ECHO_REPLY* r = (const ICMP_ECHO_REPLY*)reply_buf;
-    struct in_addr addr;
-    addr.s_addr = r->Address;
-    char* s_ip = inet_ntoa(addr);
-    std::cout << "Reply from: " << s_ip << ": bytes=" << r->DataSize << " time=" << r->RoundTripTime << "ms TTL=" << (int)r->Options.Ttl << std::endl;
-
-    // Close ICMP context.
-    IcmpCloseHandle(icmp_handle);
-    return 0;
+    if (size) cksum += *(uint8_t*)buffer;
+    cksum = (cksum >> 16) + (cksum & 0xFFFF);
+    cksum += (cksum >> 16);
+    return (uint16_t)(~cksum);
 }
+
 
 int calculate_split(char original_payload[]) {
     int size = strlen(original_payload); // for now we ignore the null terminator 
@@ -80,7 +58,6 @@ int calculate_split(char original_payload[]) {
 
     return split; // error handle latter
 }
-
 
 // Maybe need to reformat to be sur it work but this version 1 should be enough
 char* resized_char(char original_payload[], int split_placement) {
@@ -104,18 +81,147 @@ char* resized_char(char original_payload[], int split_placement) {
     return c_partial_payload;
 }
 
+int send_icmp_raw(const char* target_ip, const char* payload_data) {
+
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cerr << "WSAStartup failed." << std::endl;
+        return 1;
+    }
+
+    SOCKET sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (sock == INVALID_SOCKET) {
+        cerr << "Failed to create raw socket: " << WSAGetLastError() << endl;
+        WSACleanup();
+        return 1;
+    }
+
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    inet_pton(AF_INET, target_ip, &dest.sin_addr);
+
+    
+    char packet[sizeof(ICMPHeader) + MAXIMUM_PAYLOAD_SIZE]{};
+
+    ICMPHeader* icmp = (ICMPHeader*)packet;
+    icmp->type = 8; // Echo request
+    icmp->code = 0;
+    icmp->id = (uint16_t)GetCurrentProcessId();
+    static uint16_t seq = 0;
+    icmp->sequence = htons(seq++);
+
+    // Copy payload (max 32 bytes)
+    size_t payload_len = strlen(payload_data);
+    if (payload_len > MAXIMUM_PAYLOAD_SIZE) payload_len = MAXIMUM_PAYLOAD_SIZE;
+    memcpy(packet + sizeof(ICMPHeader), payload_data, payload_len);
+
+    // Compute checksum
+    icmp->checksum = 0;
+    icmp->checksum = checksum((uint16_t*)packet, sizeof(ICMPHeader) + (int)payload_len);
+
+    int send_result = sendto(sock, packet, sizeof(ICMPHeader) + (int)payload_len, 0,
+        (sockaddr*)&dest, sizeof(dest));
+    if (send_result == SOCKET_ERROR) {
+        cerr << "sendto failed: " << WSAGetLastError() << endl;
+        closesocket(sock);
+        WSACleanup();
+        return 1;
+    }
+
+    cout << "ICMP packet sent to " << target_ip << " with payload: \"" << payload_data << "\"" << endl;
+
+    closesocket(sock);
+    WSACleanup();
+    return 0;
+}
+
+
+void start_icmp_listener() {
+
+    
+
+    SOCKET recv_socket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (recv_socket == INVALID_SOCKET) {
+        std::cerr << "[!] Failed to create raw socket: " << WSAGetLastError() << std::endl;
+        return;
+    }
+
+    // === Bind to local interface (needed on Windows) ===
+    sockaddr_in bind_addr{};
+    bind_addr.sin_family = AF_INET;
+    bind_addr.sin_addr.s_addr = INADDR_ANY;
+    bind_addr.sin_port = 0;
+
+    if (bind(recv_socket, (sockaddr*)&bind_addr, sizeof(bind_addr)) == SOCKET_ERROR) {
+        std::cerr << "[!] bind failed: " << WSAGetLastError() << std::endl;
+        closesocket(recv_socket);
+        return;
+    }
+
+    std::cout << "[+] ICMP listener started... Waiting for packets." << std::endl;
+
+    char recv_buf[1024];
+    sockaddr_in sender{};
+    int sender_len = sizeof(sender);
+
+    while (true) {
+        int bytes_received = recvfrom(recv_socket, recv_buf, sizeof(recv_buf), 0, (sockaddr*)&sender, &sender_len);
+        if (bytes_received == SOCKET_ERROR) {
+            std::cerr << "[!] recvfrom failed: " << WSAGetLastError() << std::endl;
+            break;
+        }
+
+        unsigned char ip_header_len = (recv_buf[0] & 0x0F) * 4;
+        if (bytes_received < ip_header_len + 8) continue;
+
+        const char* icmp_data = recv_buf + ip_header_len;
+        const unsigned char icmp_type = icmp_data[0];
+        const unsigned char icmp_code = icmp_data[1];
+
+        if (icmp_type != 8 && icmp_type != 0) continue; // Echo request OR reply
+
+        const char* payload = icmp_data + 8;
+        int payload_len = bytes_received - ip_header_len - 8;
+
+        std::cout << "\n[ICMP RECEIVED] From: " << inet_ntoa(sender.sin_addr)
+            << " | Payload: ";
+        std::cout.write(payload, payload_len);
+        std::cout << std::endl;
+    }
+
+    closesocket(recv_socket);
+
+    
+
+}
+
 
 int main()
 {
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cerr << "WSAStartup failed." << std::endl;
+        return 1;
+    }
+
+    std::thread listener_thread(start_icmp_listener);
+    listener_thread.detach(); // Run in background
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
     char t[] = { "whoami a potato who really like potato for the fun of potato because potato are awsome !" };
     int split_needed = calculate_split(t);
 
     for (int i = 0; i < split_needed; i++) {
         char* value = resized_char(t, i);
-        cout << value << "length: " << strlen(value) << endl;
-        send_icmp_packet("127.0.0.1", value);
+        send_icmp_raw("127.0.0.1", value);
+        delete[] value;
     }
 
+    
+    system("pause");
 
+
+    return 0;
    
 }
