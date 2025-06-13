@@ -1,3 +1,8 @@
+/*
+TCP Over ICMP by Alexandre Gauvin
+
+*/
+
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <WS2tcpip.h>
 #include <Windows.h>
@@ -15,18 +20,26 @@
 
 using namespace std;
 
-// TODO : now we need to split the string it receive to make it at a maximum size of 32.
-// We need to find how to make that happen in C++ once this is done we will connect the function that can send data and the one that parse it
 
-//To make a TCP connection we will make a handshake over ICMP between the receiver and the sender to ensure the connection [syn,synack,ack]
-// To ensure delivery of every packet it is doable to do a handshake each time or once this is done (or during) we could say how many packet we plan on sending. and use part of the binary to tell the number of packet we are at.
-// this could limite the amount of packet we can send but might be acceptable if we use a larger part of the usable size (such as 10 bit) 
-// Maybe we could use the answer to the echo ping ? such as the number it received last ?
+const WORD FLAG_SIZE = 1; // Flag size in byte
+const WORD SEQ_ACK_NUM_SIZE = 8;  // sequance and ackk in byte ( real size is x2 ) 
+const WORD CHECK_SUM_SIZE = 3; // Check sum size in byte 
+const WORD ACTUAL_PAYLOAD_SIZE = 100; // Data size we are sending 
+const WORD SPLIT_SIZE = 5;
 
-// we will see this an other day hopefully 
+const WORD MAXIMUM_PAYLOAD_SIZE = FLAG_SIZE+(SEQ_ACK_NUM_SIZE*2)+CHECK_SUM_SIZE+ACTUAL_PAYLOAD_SIZE+(SPLIT_SIZE*4); // total size of the payload including separator
 
-const WORD MAXIMUM_PAYLOAD_SIZE = 1;
 const char PADDING = ' '; // if the string finish with white space that is padding
+
+// TCP flags (lets do hand shake and all ! 
+const char SYN = 's';
+const char ACK = 'a';
+const char SYN_ACK = 'z';
+const char FIN = 'f';
+const char FIN_ACK = 'q';
+
+
+const char* SPLIT[] = { "-^|^-" }; // Use to split the section of the payload
 
 
 struct ICMPHeader {
@@ -64,11 +77,11 @@ int calculate_split(char original_payload[]) {
 
 // Maybe need to reformat to be sur it work but this version 1 should be enough
 char* resized_char(char original_payload[], int split_placement) {
-    int position_placement = split_placement * MAXIMUM_PAYLOAD_SIZE;
+    int position_placement = split_placement * ACTUAL_PAYLOAD_SIZE;
     std::string partial_payload;
     int length = strlen(original_payload);
 
-    for (short i = 0; i < MAXIMUM_PAYLOAD_SIZE; i++) {
+    for (short i = 0; i < ACTUAL_PAYLOAD_SIZE; i++) {
         int position = i + position_placement;
         if (position >= length) {
             partial_payload += PADDING;
@@ -104,7 +117,17 @@ char* check_sum(char payload[]) {
     return c_hex;
 }
 
+void add_split() {
+    return;
+}
 
+void add_flag() {
+    return;
+}
+
+void make_sequance_number() {
+    return;
+}
 
 // ============ 
 
@@ -230,6 +253,8 @@ void start_icmp_listener() {
 int main()
 {
     // == testing
+
+    cout << MAXIMUM_PAYLOAD_SIZE << endl;
 
     char test[] = { "whoami a potato who really like potato for the fun of potato because potato are awsome !222222222222222222222222222222222222222222222222222222222"  };
 

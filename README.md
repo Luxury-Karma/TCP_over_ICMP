@@ -41,5 +41,5 @@ s-^|^-SEQUANCE_NUMBER-^|^-ACK_NUMBER-^|^-CHECK_SUM-^|^-PAYLOAD
 
 1 byte-^|^-8 bytes-^|^-8 bytes-^|^-3 bytes-^|^-100 bytes
 
-total of 120 bytes per packet. 
+total of 140 bytes per packet (including separator). 
 	- Later on I need to find a way to make the size of the packet dynamice but I need to find how to do it with char in C++ since the packet loader doesn't seem to like my strings. 
