@@ -39,7 +39,7 @@ const char FIN = 'f';
 const char FIN_ACK = 'q';
 
 
-const char* SPLIT[] = { "-^|^-" }; // Use to split the section of the payload
+const string SPLIT = "-^|^-"; // Use to split the section of the payload
 
 
 struct ICMPHeader {
@@ -117,16 +117,54 @@ char* check_sum(char payload[]) {
     return c_hex;
 }
 
-void add_split() {
-    return;
+char* add_split(char flag, char sequence_number[], char ack_number[], char check_sum[], char active_payload[]) {
+    string s_value;
+	s_value += flag; // Add the flag
+	s_value += SPLIT; // Add the split separator
+	s_value += sequence_number; // Add the sequence number
+	s_value += SPLIT; // Add the split separator
+	s_value += ack_number; // Add the ack number
+	s_value += SPLIT; // Add the split separator
+	s_value += check_sum; // Add the checksum
+	s_value += SPLIT; // Add the split separator
+	s_value += active_payload; // Add the active payload
+
+	char* value = new char[s_value.length() + 1];
+	strcpy_s(value,s_value.length()+1, s_value.c_str());
+    return value;
 }
 
-void add_flag() {
-    return;
+
+string* make_sequance_number(int split_amount) {
+
+    int array_size = split_amount + 5;// the + 5 is to give one to each TCP information (syn,synack..)
+    int* sequance_number = new int[array_size];
+
+    int original_number = 0; // in the future we might want to make it random (or not will be here in case because it change nothing)
+
+    // Generate all the needed number
+    for (int i = 0; i < array_size; i++) {
+        sequance_number[i] = original_number + i;
+    }
+
+    string* out = new string[array_size];
+
+    // ensure their length is of the value of the const for SEQ_ACK_NUM_SIZE
+    for (int i = 0; i < array_size; i++) {
+        string test_value = to_string(sequance_number[i]);
+        while (test_value.length() < SEQ_ACK_NUM_SIZE) {
+            test_value = "0" + test_value;
+        }
+        out[i] = test_value;
+    }
+
+    return out;
 }
 
-void make_sequance_number() {
-    return;
+char* convert_string_to_char_array(string value) {
+    char* out = new char[value.length() + 1];
+    strcpy_s(out, value.length() + 1, value.c_str());
+    return out;
 }
 
 // ============ 
@@ -253,17 +291,10 @@ void start_icmp_listener() {
 int main()
 {
     // == testing
+	
+    string* value = make_sequance_number(10);
 
-    cout << MAXIMUM_PAYLOAD_SIZE << endl;
-
-    char test[] = { "whoami a potato who really like potato for the fun of potato because potato are awsome !222222222222222222222222222222222222222222222222222222222"  };
-
-    cout << strlen(test) << endl;
-
-    cout << check_sum(test) << endl;
-
-    
-    system("pause");
+     system("pause");
 
 
 
