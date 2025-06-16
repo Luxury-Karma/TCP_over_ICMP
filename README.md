@@ -13,7 +13,8 @@ TCP FLAGS :
 - a : ack
 - z : syn,ack
 - f : fin
-- q : fin,ack 
+- q : fin,ack
+- e : error ( use for a mal formated packet )
 
 the flag will need 1 byte.
 

@@ -14,6 +14,7 @@ TCP Over ICMP by Alexandre Gauvin
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <vector>
 
 #pragma comment(lib, "Iphlpapi.lib")
 #pragma comment(lib, "Ws2_32.lib")
@@ -37,6 +38,7 @@ const char ACK = 'a';
 const char SYN_ACK = 'z';
 const char FIN = 'f';
 const char FIN_ACK = 'q';
+const char PAYLOAD_FLAG = 'p';
 
 
 const string SPLIT = "-^|^-"; // Use to split the section of the payload
@@ -50,7 +52,7 @@ struct ICMPHeader {
     uint16_t sequence;
 };
 
-// Compute checksum for ICMP packet
+// checksum for ICMP packet
 uint16_t checksum(uint16_t* buffer, int size) {
     uint32_t cksum = 0;
     while (size > 1) {
@@ -69,8 +71,8 @@ int calculate_split(char original_payload[]) {
     int size = strlen(original_payload); // for now we ignore the null terminator 
 
     long split = ceil(static_cast<float>(size) / MAXIMUM_PAYLOAD_SIZE); // give us the amount of split we will need 
-    cout << "String size is : " << size << endl;
-    cout << "Amount of split needed : " << split << endl;
+    std:cout << "String size is : " << size << endl;
+    std:cout << "Amount of split needed : " << split << endl;
 
     return split; // error handle latter
 }
@@ -219,7 +221,7 @@ int send_icmp_raw(const char* target_ip, const char* payload_data) {
         return 1;
     }
 
-    cout << "ICMP packet sent to " << target_ip << " with payload: \"" << payload_data << "\"" << endl;
+    std:cout << "ICMP packet sent to " << target_ip << " with payload: \"" << payload_data << "\"" << endl;
 
     closesocket(sock);
     WSACleanup();
@@ -249,7 +251,7 @@ void start_icmp_listener() {
         return;
     }
 
-    std::cout << "[+] ICMP listener started... Waiting for packets." << std::endl;
+    std:cout << "[+] ICMP listener started... Waiting for packets." << std::endl;
 
     char recv_buf[1024];
     sockaddr_in sender{};
@@ -288,13 +290,104 @@ void start_icmp_listener() {
 
 // ============
 
+
+
+// === Region Understanding Payload ==
+
+/// This allways receive it in this order : 
+/// 0 : flag (char)
+/// 1 : seq number (int)(in a char)
+/// 2 : ack number (int)(in a char)
+/// 3 : checksum (hex)(in a char)
+/// 4 : data (allways consider it string for now)
+void split_reception(char* data) {
+    string s_data = data;
+
+    std::vector<std::string> result;
+    size_t start = 0;
+    size_t end = s_data.find(SPLIT);
+
+    while (end != std::string::npos) {
+        result.push_back(s_data.substr(start, end - start));
+        start = end + SPLIT.length();
+        end = s_data.find(SPLIT, start);
+    }
+
+    result.push_back(s_data.substr(start));
+
+    if (result.size() != 5) {
+        // Make error handling so random ICMP packet does not destroy the script 
+        std:cout << "[!] ALLERT : The recieved packet does not have the supposed amount of information";
+    }
+    // Verify flag is properly handled
+    if (result[0].size() > 1) {
+    std:cout << "[!] Alert : Malformated packet the first part is longer than 1. : " << result[0] << endl;
+    }
+
+    char flag = convert_string_to_char_array(result[0])[0];
+    char* seq_num = convert_string_to_char_array(result[1]);
+    char* ack_num = convert_string_to_char_array(result[2]);
+    char* check_ar = convert_string_to_char_array(result[3]);
+    char* payload = convert_string_to_char_array(result[4]);
+
+    
+    return; 
+}
+
+void act_received_flag(char flag) {
+    switch (flag) {
+        case SYN:
+            break;
+        case ACK:
+            break;
+        case SYN_ACK:
+            break;
+        case FIN:
+            break;
+        case FIN_ACK:
+            break;
+        case PAYLOAD_FLAG:
+            break;
+        default:
+            std:cout << "[?] Unhanddle flag received: " << flag << endl;
+            break;
+
+    }
+    return;
+}
+
+void act_received_payload(char* payload) {
+    return; 
+}
+
+void act_received_sequance(char* sequance_number) {
+    return;
+}
+
+void act_received_ack_sequance(char* sequance_ack_numebr) {
+    return;
+}
+
+void act_received_check_sum(char* check_sum) {
+
+    return;
+}
+
+
+
+
+
+// ============
+
+
 int main()
 {
     // == testing
 	
-    string* value = make_sequance_number(10);
+    
 
-     system("pause");
+
+     //system("pause");
 
 
 
@@ -314,10 +407,15 @@ int main()
 
     char t[] = { "whoami a potato who really like potato for the fun of potato because potato are awsome !" };
     int split_needed = calculate_split(t);
+    string* seq_a = make_sequance_number(split_needed);
 
     for (int i = 0; i < split_needed; i++) {
         char* value = resized_char(t, i);
-        send_icmp_raw("127.0.0.1", value);
+
+        char* data = add_split(SYN, convert_string_to_char_array(seq_a[i]), convert_string_to_char_array(seq_a[i]), check_sum(value), value);
+        split_reception(data);
+        //std:cout << data << endl;
+        //send_icmp_raw("127.0.0.1", data);
         delete[] value;
     }
 
