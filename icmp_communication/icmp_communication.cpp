@@ -274,81 +274,16 @@ private:
 
     // === Region Understanding Payload ==
 
-    /// This allways receive it in this order : 
-    /// 0 : flag (char)
-    /// 1 : seq number (int)(in a char)
-    /// 2 : ack number (int)(in a char)
-    /// 3 : checksum (hex)(in a char)
-    /// 4 : data (allways consider it string for now)
-    void split_reception(char* data) {
-        string s_data = data;
-
-        std::vector<std::string> result;
-        size_t start = 0;
-        size_t end = s_data.find(SPLIT);
-
-        while (end != std::string::npos) {
-            result.push_back(s_data.substr(start, end - start));
-            start = end + SPLIT.length();
-            end = s_data.find(SPLIT, start);
-        }
-
-        result.push_back(s_data.substr(start));
-
-        if (result.size() != 5) {
-            // Make error handling so random ICMP packet does not destroy the script 
-        cout << "[!] ALLERT : The recieved packet does not have the supposed amount of information";
-        }
-        // Verify flag is properly handled
-        if (result[0].size() > 1) {
-        cout << "[!] Alert : Malformated packet the first part is longer than 1. : " << result[0] << endl;
-        }
-
-        char flag = convert_string_to_char_array(result[0])[0];
-        char* seq_num = convert_string_to_char_array(result[1]);
-        char* ack_num = convert_string_to_char_array(result[2]);
-        char* check_ar = convert_string_to_char_array(result[3]);
-        char* payload = convert_string_to_char_array(result[4]);
-
-        switch (flag)
-        {
-        case SYN:
-            start_syn_connection(seq_num, payload);
-            break;
-        case SYN_ACK:
-            syn_ack_received(seq_num, payload);
-            break;
-        case ACK:
-            ack_received(seq_num, payload);
-            break;
-        case FIN:
-            break;
-        case FIN_ACK:
-            fin_ack_recieved();
-            break;
-        default:
-            cout << "[?] Unknown Flag received. Properly formated packet.";
-            break;
-        }
-
-
-        return;
-    }
-
-    void start_syn_connection(char* seq_numb, char* payload) {
+    
+    void syn_received(char* seq_numb, char* payload) {
         string* seq_ack = next_seq_and_ack(seq_numb);
 
-
-
-
-        /*THIS IS NOT GOOD WE NEED TO MAKE A WAY TO KEEP TRACK OF A SPECIFIC SESSION WITH MULTIPLE TCP CONNECTION STOP BEEING DUMB!*/
-        active_connection_information["ip"] = ip;
         active_connection_information["last_flag"] = "";
 
         char* seq = convert_string_to_char_array(seq_ack[0]);
         char* ack = convert_string_to_char_array(seq_ack[1]);
         char* sum = check_sum(payload);
-        send_icmp_raw(ip, add_split(SYN_ACK, seq,ack, sum, payload)); // send a SYN ACK packet 
+        send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(SYN_ACK, seq, ack, sum, payload)); // send a SYN ACK packet 
 
         return;
     }
@@ -357,10 +292,9 @@ private:
         // send ACK back
         string* seq_ack = next_seq_and_ack(seq_numb);
 
-        active_connection_information["ip"] = ip;
-        active_connection_information["last_flag"] = SYN;
+        active_connection_information["last_flag"] = SYN_ACK;
 
-        send_icmp_raw(ip, add_split(SYN_ACK, convert_string_to_char_array(seq_ack[0]), convert_string_to_char_array(seq_ack[1]), check_sum(payload), payload)); // send a SYN ACK packet 
+        send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(ACK, convert_string_to_char_array(seq_ack[0]), convert_string_to_char_array(seq_ack[1]), check_sum(payload), payload)); // send a SYN ACK packet 
         return;
     }
 
@@ -386,24 +320,122 @@ private:
         return;
     }
 
-    void fin_received() {
+    void fin_received(char* seq_numb, char* payload) {
         // send back fin ack
+        string* seq_ack = next_seq_and_ack(seq_numb);
+        active_connection_information["last_flag"] = FIN;
+        send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(FIN_ACK, convert_string_to_char_array(seq_ack[0]), convert_string_to_char_array(seq_ack[1]), check_sum(payload), payload)); // send a SYN ACK packet 
         return;
     }
 
-    void fin_ack_recieved() {
+    void fin_ack_recieved(char* seq_numb, char* payload) {
         // send back ack
+        string* seq_ack = next_seq_and_ack(seq_numb);
+        active_connection_information["last_flag"] = FIN_ACK;
+        send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(ACK, convert_string_to_char_array(seq_ack[0]), convert_string_to_char_array(seq_ack[1]), check_sum(payload), payload)); // send a SYN ACK packet 
+        return;
+
         return;
     }
 
     // ============
 
+
+
 public :
-    char* ip;
+
     icmp_tcp(string _ip) {
-        ip = convert_string_to_char_array(_ip);
+        active_connection_information["ip"] = _ip;
+        active_connection_information["id"] = "00"; // TODO when we make the logic for the ID we need to make logic here
+        active_connection_information["last_flag"] = ""; // initialise it
+
+
     }
 
+
+    /// This allways receive it in this order : 
+    /// 0 : flag (char)
+    /// 1 : seq number (int)(in a char)
+    /// 2 : ack number (int)(in a char)
+    /// 3 : checksum (hex)(in a char)
+    /// 4 : data (allways consider it string for now)
+    void split_reception(char* data) {
+        string s_data = data;
+
+        std::vector<std::string> result;
+        size_t start = 0;
+        size_t end = s_data.find(SPLIT);
+
+        while (end != std::string::npos) {
+            result.push_back(s_data.substr(start, end - start));
+            start = end + SPLIT.length();
+            end = s_data.find(SPLIT, start);
+        }
+
+        result.push_back(s_data.substr(start));
+
+        if (result.size() != 5) {
+            // Make error handling so random ICMP packet does not destroy the script 
+            cout << "[!] ALLERT : The recieved packet does not have the supposed amount of information";
+        }
+        // Verify flag is properly handled
+        if (result[0].size() > 1) {
+            cout << "[!] Alert : Malformated packet the first part is longer than 1. : " << result[0] << endl;
+        }
+
+        char flag = convert_string_to_char_array(result[0])[0];
+        char* seq_num = convert_string_to_char_array(result[1]);
+        char* ack_num = convert_string_to_char_array(result[2]);
+        char* check_ar = convert_string_to_char_array(result[3]);
+        char* payload = convert_string_to_char_array(result[4]);
+
+        switch (flag)
+        {
+        case SYN:
+            syn_received(seq_num, payload);
+            break;
+        case SYN_ACK:
+            syn_ack_received(seq_num, payload);
+            break;
+        case ACK:
+            ack_received(seq_num, payload);
+            break;
+        case FIN:
+            fin_received(seq_num, payload);
+            break;
+        case FIN_ACK:
+            fin_ack_recieved(seq_num, payload);
+            break;
+        default:
+            cout << "[?] Unknown Flag received. Properly formated packet.";
+            break;
+        }
+
+
+        return;
+    }
+
+
+    bool start_connection() {
+
+        char payload[] = {" "};
+        char* seq_num = format_sequance_number('0');
+        char* ack_num = format_sequance_number('1');
+        char* check = check_sum(payload);
+
+        char* data = add_split(SYN, seq_num, ack_num, check, payload);
+
+        try {
+            send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), data);
+        }
+        catch (int e) {
+            cout << "[!] Error sending the ICMP packet in the start connection error : " << e;
+            return false; // this mean it wasn't able to send the packet 
+        };
+
+
+        return true; // this mean it was able to send the packet
+    }
 
 
     int test_area()
@@ -504,8 +536,6 @@ std:cout << "[+] ICMP listener started... Waiting for packets." << std::endl;
 
     closesocket(recv_socket);
 
-
-
 }
 
 
@@ -524,7 +554,8 @@ int main() {
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
     icmp_tcp t = icmp_tcp("127.0.0.1");
-    t.test_area();
+    t.start_connection();
+    //t.test_area();
     return 0;
 }
 
