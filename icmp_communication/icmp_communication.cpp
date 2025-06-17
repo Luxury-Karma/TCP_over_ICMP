@@ -161,7 +161,9 @@ private:
         sequance_number = format_sequance_number(i_seq_numb);
         char* ack_numb = format_sequance_number(i_ack_numb);
 
-        string out[]  = {sequance_number, ack_numb};
+        string* out = new string[2];
+        out[0] = sequance_number;
+        out[1] = ack_numb;
 
         return out;
         
@@ -265,64 +267,6 @@ private:
     }
 
 
-    void start_icmp_listener() {
-
-
-
-        SOCKET recv_socket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-        if (recv_socket == INVALID_SOCKET) {
-            std::cerr << "[!] Failed to create raw socket: " << WSAGetLastError() << std::endl;
-            return;
-        }
-
-        // === Bind to local interface (needed on Windows) ===
-        sockaddr_in bind_addr{};
-        bind_addr.sin_family = AF_INET;
-        bind_addr.sin_addr.s_addr = INADDR_ANY;
-        bind_addr.sin_port = 0;
-
-        if (bind(recv_socket, (sockaddr*)&bind_addr, sizeof(bind_addr)) == SOCKET_ERROR) {
-            std::cerr << "[!] bind failed: " << WSAGetLastError() << std::endl;
-            closesocket(recv_socket);
-            return;
-        }
-
-    std:cout << "[+] ICMP listener started... Waiting for packets." << std::endl;
-
-        char recv_buf[1024];
-        sockaddr_in sender{};
-        int sender_len = sizeof(sender);
-
-        while (true) {
-            int bytes_received = recvfrom(recv_socket, recv_buf, sizeof(recv_buf), 0, (sockaddr*)&sender, &sender_len);
-            if (bytes_received == SOCKET_ERROR) {
-                std::cerr << "[!] recvfrom failed: " << WSAGetLastError() << std::endl;
-                break;
-            }
-
-            unsigned char ip_header_len = (recv_buf[0] & 0x0F) * 4;
-            if (bytes_received < ip_header_len + 8) continue;
-
-            const char* icmp_data = recv_buf + ip_header_len;
-            const unsigned char icmp_type = icmp_data[0];
-            const unsigned char icmp_code = icmp_data[1];
-
-            if (icmp_type != 8 && icmp_type != 0) continue; // Echo request OR reply
-
-            const char* payload = icmp_data + 8;
-            int payload_len = bytes_received - ip_header_len - 8;
-
-            std::cout << "\n[ICMP RECEIVED] From: " << inet_ntoa(sender.sin_addr)
-                << " | Payload: ";
-            std::cout.write(payload, payload_len);
-            std::cout << std::endl;
-        }
-
-        closesocket(recv_socket);
-
-
-
-    }
 
     // ============
 
@@ -394,10 +338,17 @@ private:
     void start_syn_connection(char* seq_numb, char* payload) {
         string* seq_ack = next_seq_and_ack(seq_numb);
 
+
+
+
         /*THIS IS NOT GOOD WE NEED TO MAKE A WAY TO KEEP TRACK OF A SPECIFIC SESSION WITH MULTIPLE TCP CONNECTION STOP BEEING DUMB!*/
         active_connection_information["ip"] = ip;
         active_connection_information["last_flag"] = "";
-        send_icmp_raw(ip, add_split(SYN_ACK, convert_string_to_char_array(seq_ack[0]),convert_string_to_char_array(seq_ack[1]), check_sum(payload), payload)); // send a SYN ACK packet 
+
+        char* seq = convert_string_to_char_array(seq_ack[0]);
+        char* ack = convert_string_to_char_array(seq_ack[1]);
+        char* sum = check_sum(payload);
+        send_icmp_raw(ip, add_split(SYN_ACK, seq,ack, sum, payload)); // send a SYN ACK packet 
 
         return;
     }
@@ -469,16 +420,7 @@ public :
         // ======
 
 
-        WSADATA wsaData;
-        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-            std::cerr << "WSAStartup failed." << std::endl;
-            return 1;
-        }
-
-        std::thread listener_thread(&icmp_tcp::start_icmp_listener, this);
-        listener_thread.detach(); // Run in background
-
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        
 
         char t[] = { "whoami a potato who really like potato for the fun of potato because potato are awsome !" };
         int split_needed = calculate_split(t);
@@ -506,8 +448,84 @@ public :
 };
 
 
+
+void start_icmp_listener() {
+
+
+
+    SOCKET recv_socket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (recv_socket == INVALID_SOCKET) {
+        std::cerr << "[!] Failed to create raw socket: " << WSAGetLastError() << std::endl;
+        return;
+    }
+
+    // === Bind to local interface (needed on Windows) ===
+    sockaddr_in bind_addr{};
+    bind_addr.sin_family = AF_INET;
+    bind_addr.sin_addr.s_addr = INADDR_ANY;
+    bind_addr.sin_port = 0;
+
+    if (bind(recv_socket, (sockaddr*)&bind_addr, sizeof(bind_addr)) == SOCKET_ERROR) {
+        std::cerr << "[!] bind failed: " << WSAGetLastError() << std::endl;
+        closesocket(recv_socket);
+        return;
+    }
+
+std:cout << "[+] ICMP listener started... Waiting for packets." << std::endl;
+
+    char recv_buf[1024];
+    sockaddr_in sender{};
+    int sender_len = sizeof(sender);
+
+    while (true) {
+        int bytes_received = recvfrom(recv_socket, recv_buf, sizeof(recv_buf), 0, (sockaddr*)&sender, &sender_len);
+        if (bytes_received == SOCKET_ERROR) {
+            std::cerr << "[!] recvfrom failed: " << WSAGetLastError() << std::endl;
+            break;
+        }
+
+        unsigned char ip_header_len = (recv_buf[0] & 0x0F) * 4;
+        if (bytes_received < ip_header_len + 8) continue;
+
+        const char* icmp_data = recv_buf + ip_header_len;
+        const unsigned char icmp_type = icmp_data[0];
+        const unsigned char icmp_code = icmp_data[1];
+
+        if (icmp_type != 8 && icmp_type != 0) continue; // Echo request OR reply
+
+        const char* payload = icmp_data + 8;
+        int payload_len = bytes_received - ip_header_len - 8;
+
+        std::cout << "\n[ICMP RECEIVED] From: " << inet_ntoa(sender.sin_addr)
+            << " | Payload: ";
+        std::cout.write(payload, payload_len);
+        std::cout << std::endl;
+    }
+
+    closesocket(recv_socket);
+
+
+
+}
+
+
+
 int main() {
+
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cerr << "WSAStartup failed." << std::endl;
+        return 1;
+    }
+
+    std::thread listener_thread(start_icmp_listener);
+    listener_thread.detach(); // Run in background
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
     icmp_tcp t = icmp_tcp("127.0.0.1");
     t.test_area();
     return 0;
 }
+
+
