@@ -58,9 +58,11 @@ private:
     static constexpr WORD SEQ_ACK_NUM_SIZE = 8;  // sequance and ackk in byte ( real size is x2 ) 
     static constexpr WORD CHECK_SUM_SIZE = 3; // Check sum size in byte 
     static constexpr WORD ACTUAL_PAYLOAD_SIZE = 100; // Data size we are sending 
+    static constexpr WORD UID = 5;
     static constexpr WORD SPLIT_SIZE = 5;
+    
 
-    static constexpr WORD MAXIMUM_PAYLOAD_SIZE = FLAG_SIZE + (SEQ_ACK_NUM_SIZE * 2) + CHECK_SUM_SIZE + ACTUAL_PAYLOAD_SIZE + (SPLIT_SIZE * 4); // total size of the payload including separator
+    static constexpr WORD MAXIMUM_PAYLOAD_SIZE = FLAG_SIZE + (SEQ_ACK_NUM_SIZE * 2) + CHECK_SUM_SIZE + ACTUAL_PAYLOAD_SIZE + UID + (SPLIT_SIZE * 5); // total size of the payload including separator
 
     static constexpr char PADDING = ' '; // if the string finish with white space that is padding
 
@@ -74,9 +76,7 @@ private:
     const std::string SPLIT = "-^|^-";// Use to split the section of the payload
 
 
-    /* TODO: make this more good */
-    map<string, string> active_connection_information;
-    /* THIS HERE !!! */
+    
 
     // checksum for ICMP packet
     uint16_t checksum(uint16_t* buffer, int size) {
@@ -103,27 +103,6 @@ private:
         return split; // error handle latter
     }
 
-    // Maybe need to reformat to be sur it work but this version 1 should be enough
-    char* resized_char(char original_payload[], int split_placement) {
-        int position_placement = split_placement * ACTUAL_PAYLOAD_SIZE;
-        std::string partial_payload;
-        int length = strlen(original_payload);
-
-        for (short i = 0; i < ACTUAL_PAYLOAD_SIZE; i++) {
-            int position = i + position_placement;
-            if (position >= length) {
-                partial_payload += PADDING;
-                continue;
-            }
-
-            partial_payload += original_payload[position];
-        }
-
-        char* c_partial_payload = new char[partial_payload.length() + 1];
-        strcpy_s(c_partial_payload, partial_payload.length() + 1, partial_payload.c_str());
-
-        return c_partial_payload;
-    }
 
     char* check_sum(char payload[]) {
 
@@ -146,6 +125,9 @@ private:
     }
 
     char* add_split(char flag, char sequence_number[], char ack_number[], char check_sum[], char active_payload[]) {
+
+        char* a_payload = padding_payload(active_payload);
+
         string s_value;
         s_value += flag; // Add the flag
         s_value += SPLIT; // Add the split separator
@@ -155,12 +137,15 @@ private:
         s_value += SPLIT; // Add the split separator
         s_value += check_sum; // Add the checksum
         s_value += SPLIT; // Add the split separator
-        s_value += active_payload; // Add the active payload
+        s_value += a_payload; // Add the active payload
         s_value += SPLIT; // Add the split separator
         s_value += active_connection_information["uid"]; // add the ID of the connection
 
         char* value = new char[s_value.length() + 1];
         strcpy_s(value, s_value.length() + 1, s_value.c_str());
+
+        cout << "payload created : " << value << endl;
+
         return value;
     }
 
@@ -226,6 +211,16 @@ private:
         // TODO : add validation with regex that there is only number in there 
 
         return atoi(num);
+    }
+    
+    char* padding_payload(char* payload) {
+        string temp = payload;
+        
+        while (temp.size() < ACTUAL_PAYLOAD_SIZE) {
+            temp = temp + PADDING;
+        }
+
+        return convert_string_to_char_array(temp);
     }
 
     // ============ 
@@ -365,6 +360,10 @@ private:
 
 public :
 
+    /* TODO: make this more good */
+    map<string, string> active_connection_information;
+    /* THIS HERE !!! */
+
     icmp_tcp(string _ip) {
         active_connection_information["ip"] = _ip;
         active_connection_information["uid"] = "00"; // TODO when we make the logic for the ID we need to make logic here
@@ -378,7 +377,7 @@ public :
 
     bool start_connection() {
 
-        char payload[] = {" "};
+        char payload[] = {"hello"};
         char* seq_num = format_sequance_number('0');
         char* ack_num = format_sequance_number('1');
         char* check = check_sum(payload);
@@ -494,15 +493,16 @@ std:cout << "[+] ICMP listener started... Waiting for packets." << std::endl;
         const char* payload = icmp_data + 8;
         int payload_len = bytes_received - ip_header_len - 8;
 
+        std::string payload_str(payload, payload_len); // make the data readable without all of the padding
+
+
         // === Debug for the reception of the packet
 
-        std::cout << "\n[ICMP RECEIVED] From: " << inet_ntoa(sender.sin_addr)
-            << " | Payload: ";
-        std::cout.write(payload, payload_len) << std::endl;
+        std::cout << "\n[ICMP RECEIVED] From: " << inet_ntoa(sender.sin_addr) << " | Payload: " << payload_str;
 
         // === send the packet to the main thread.
         std::lock_guard<std::mutex> lock(icmp_mutex);
-        string full_payload = payload + SPLIT + inet_ntoa(sender.sin_addr);
+        string full_payload = payload_str + SPLIT + inet_ntoa(sender.sin_addr);
         icmp_packet_queue.emplace(full_payload);
         icmp_cv.notify_one(); // Notify main thread
 
@@ -526,10 +526,17 @@ int main() {
     listener_thread.detach(); // Run in background
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
+    std::vector<icmp_tcp> all_active_connection;
+
+    
 
     icmp_tcp t = icmp_tcp("127.0.0.1");
+
     t.start_connection();
     
+    all_active_connection.push_back(t);
+
+
     while (true) {
         
         
@@ -546,8 +553,15 @@ int main() {
 
         cout << "received data from: " << data[IP_POSITION] << " with ID : " << data[UID_POSITION] << endl;
 
+        for (int i = 0; i < all_active_connection.size(); i++) {
+            bool uid = all_active_connection[i].active_connection_information["uid"] == data[UID_POSITION];
+            bool ip = data[IP_POSITION] == all_active_connection[i].active_connection_information["ip"];
+            if (ip && uid) {
+                cout << "Found a matching IP and id" << endl;
+            }
+        }
 
-        // Handle packet...
+
     }
 
 
