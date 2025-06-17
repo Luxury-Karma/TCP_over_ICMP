@@ -104,23 +104,18 @@ private:
     }
 
 
-    char* check_sum(char payload[]) {
-
+    char* check_sum(const char payload[], int length) {
         int sum = 0;
-
-        for (int i = 0; i < sizeof(payload); i++) {
-            sum += (int)(unsigned char)payload[i];
+        for (int i = 0; i < length; i++) {
+            sum += (unsigned char)payload[i];
         }
-        stringstream string_stream;
-        string_stream << hex << uppercase << sum;
 
-        string hex = string_stream.str();
+        std::stringstream string_stream;
+        string_stream << std::hex << std::uppercase << sum;
+        std::string hex = string_stream.str();
 
-        // make it usable
         char* c_hex = new char[hex.length() + 1];
         strcpy_s(c_hex, hex.length() + 1, hex.c_str());
-
-
         return c_hex;
     }
 
@@ -282,7 +277,13 @@ private:
         return 0;
     }
 
+    bool is_check_sum_okay(char* payload_data, char* received_checksum) {
+        char* sum = check_sum(payload_data, strlen(payload_data)); 
+        bool result = strcmp(sum, received_checksum) == 0;
+        delete sum;
+        return result;
 
+    }
 
     // ============
 
@@ -290,6 +291,28 @@ private:
 
     // === Region Understanding Payload ==
 
+    string remove_payload_padding(string payload) {
+        int padding_finish_position = payload.size() - 1;
+        // Find where the padding finish
+        for (int i = payload.size() - 1; i >= 0; i--) {
+            
+            if (payload[i] == PADDING) {
+                continue;
+            }
+
+            padding_finish_position = i;
+            break;
+
+        }
+
+        string value = "";
+
+        for (int i = 0; i <= padding_finish_position; i++) {
+            value = value + payload[i];
+        }
+
+        return value;
+    }
     
     void syn_received(char* seq_numb, char* payload) {
         string* seq_ack = next_seq_and_ack(seq_numb);
@@ -298,7 +321,7 @@ private:
 
         char* seq = convert_string_to_char_array(seq_ack[0]);
         char* ack = convert_string_to_char_array(seq_ack[1]);
-        char* sum = check_sum(payload);
+        char* sum = check_sum(payload, strlen(payload));
         send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(SYN_ACK, seq, ack, sum, payload)); // send a SYN ACK packet 
 
         return;
@@ -310,7 +333,7 @@ private:
 
         active_connection_information["last_flag"] = SYN_ACK;
 
-        send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(ACK, convert_string_to_char_array(seq_ack[0]), convert_string_to_char_array(seq_ack[1]), check_sum(payload), payload)); // send a SYN ACK packet 
+        send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(ACK, convert_string_to_char_array(seq_ack[0]), convert_string_to_char_array(seq_ack[1]), check_sum(payload, strlen(payload)), payload)); // send a SYN ACK packet 
         return;
     }
 
@@ -340,7 +363,7 @@ private:
         // send back fin ack
         string* seq_ack = next_seq_and_ack(seq_numb);
         active_connection_information["last_flag"] = FIN;
-        send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(FIN_ACK, convert_string_to_char_array(seq_ack[0]), convert_string_to_char_array(seq_ack[1]), check_sum(payload), payload)); // send a SYN ACK packet 
+        send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(FIN_ACK, convert_string_to_char_array(seq_ack[0]), convert_string_to_char_array(seq_ack[1]), check_sum(payload,strlen(payload)), payload)); // send a SYN ACK packet 
         return;
     }
 
@@ -348,7 +371,7 @@ private:
         // send back ack
         string* seq_ack = next_seq_and_ack(seq_numb);
         active_connection_information["last_flag"] = FIN_ACK;
-        send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(ACK, convert_string_to_char_array(seq_ack[0]), convert_string_to_char_array(seq_ack[1]), check_sum(payload), payload)); // send a SYN ACK packet 
+        send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), add_split(ACK, convert_string_to_char_array(seq_ack[0]), convert_string_to_char_array(seq_ack[1]), check_sum(payload, strlen(payload)), payload)); // send a SYN ACK packet 
         return;
 
         return;
@@ -380,7 +403,7 @@ public :
         char payload[] = {"hello"};
         char* seq_num = format_sequance_number('0');
         char* ack_num = format_sequance_number('1');
-        char* check = check_sum(payload);
+        char* check = check_sum(payload,strlen(payload));
 
         char* data = add_split(SYN, seq_num, ack_num, check, payload);
 
@@ -396,6 +419,42 @@ public :
         return true; // this mean it was able to send the packet
     }
 
+
+    void act_on_reception(string* info_packet) {
+        char flag = info_packet[FLAG_POSITION][0];
+
+        info_packet[PAYLOAD_POSITION] = remove_payload_padding(info_packet[PAYLOAD_POSITION]);
+
+        if (!is_check_sum_okay(convert_string_to_char_array(info_packet[PAYLOAD_POSITION]), convert_string_to_char_array(info_packet[CHECK_SUM_POSITION]))) {
+            cout << "[?] Check sum did not match. Packet got corrupted payload " << info_packet[PAYLOAD_POSITION];
+            return;
+        }
+        
+        switch (flag)
+        {
+        case SYN:
+            syn_received(convert_string_to_char_array(info_packet[SEQ_POSITION]), convert_string_to_char_array(info_packet[PAYLOAD_POSITION]));
+            break;
+        case SYN_ACK:
+            syn_ack_received(convert_string_to_char_array(info_packet[SEQ_POSITION]), convert_string_to_char_array(info_packet[PAYLOAD_POSITION]));
+            break;
+        case ACK:
+            ack_received(convert_string_to_char_array(info_packet[SEQ_POSITION]), convert_string_to_char_array(info_packet[PAYLOAD_POSITION]));
+            break;
+        case FIN:
+            fin_received(convert_string_to_char_array(info_packet[SEQ_POSITION]), convert_string_to_char_array(info_packet[PAYLOAD_POSITION]));
+            break;
+        case FIN_ACK:
+            fin_ack_recieved(convert_string_to_char_array(info_packet[SEQ_POSITION]), convert_string_to_char_array(info_packet[PAYLOAD_POSITION]));
+            break;
+        case PAYLOAD_FLAG:
+            break;
+        default:
+            cout << "[?] The packet did not have a known flag to act on : " << flag << endl;
+            break;
+        }
+        
+    }
 
 };
 
@@ -553,12 +612,17 @@ int main() {
 
         cout << "received data from: " << data[IP_POSITION] << " with ID : " << data[UID_POSITION] << endl;
 
+        
+
         for (int i = 0; i < all_active_connection.size(); i++) {
-            bool uid = all_active_connection[i].active_connection_information["uid"] == data[UID_POSITION];
-            bool ip = data[IP_POSITION] == all_active_connection[i].active_connection_information["ip"];
-            if (ip && uid) {
-                cout << "Found a matching IP and id" << endl;
+            icmp_tcp connection = all_active_connection[i];
+            bool uid = connection.active_connection_information["uid"] == data[UID_POSITION];
+            bool ip = data[IP_POSITION] == connection.active_connection_information["ip"];
+            if (!ip && !uid) {
+                continue;
             }
+
+            connection.act_on_reception(data);
         }
 
 
