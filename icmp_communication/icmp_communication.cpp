@@ -343,6 +343,7 @@ private:
 
         if (active_connection_information["last_flag"] == to_string(SYN) || active_connection_information["last_flag"] == to_string(SYN_ACK)) {
             active_connection_information["last_flag"] = ACK;
+            is_connected = true;
 
         }
 
@@ -387,11 +388,16 @@ public :
     map<string, string> active_connection_information;
     /* THIS HERE !!! */
 
-    icmp_tcp(string _ip) {
+    bool is_starting_connection;
+    bool is_connected;
+
+    // if starting_connection = true ( you are the initiator )
+    icmp_tcp(string _ip, bool _is_starting_connection) {
         active_connection_information["ip"] = _ip;
         active_connection_information["uid"] = "00"; // TODO when we make the logic for the ID we need to make logic here
         active_connection_information["last_flag"] = ""; // initialise it
-
+        is_starting_connection = _is_starting_connection;
+        is_connected = false;
 
     }
 
@@ -454,6 +460,49 @@ public :
             break;
         }
         
+    }
+
+
+    void send_data(char data_to_send[]) {
+        // This is dumb why do I have like 20 conversion.. I think I should convert the map into a fucking normal object why am I so stupid
+        int i_seq_number = convert_char_to_int(convert_string_to_char_array(active_connection_information["seq"])) + 1;
+        char* seq_number = convert_string_to_char_array(to_string(i_seq_number)); // We need optimisation for case like this...
+        char* ack_number = convert_string_to_char_array(to_string(i_seq_number + 1));
+        char* sum = check_sum(data_to_send, strlen(data_to_send));
+
+        char* data = add_split(PAYLOAD_FLAG, seq_number, ack_number, sum, data_to_send);
+        try {
+            send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), data);
+        }
+        catch (int e) {
+            cout << "[!] Error sending the ICMP packet in the payload connection error : " << e;
+            return;
+        };
+
+
+    }
+
+    bool close_connection() {
+        char payload[] = { "Done" };
+
+        // This is dumb why do I have like 20 conversion.. I think I should convert the map into a fucking normal object why am I so stupid
+        int i_seq_number = convert_char_to_int(convert_string_to_char_array(active_connection_information["seq"])) + 1;
+        char* seq_number = convert_string_to_char_array(to_string(i_seq_number)); // We need optimisation for case like this...
+        char* ack_number = convert_string_to_char_array(to_string(i_seq_number + 1));
+        char* sum = check_sum(payload, strlen(payload));
+
+        char* data = add_split(FIN, seq_number, ack_number, sum, payload);
+
+        try {
+            send_icmp_raw(convert_string_to_char_array(active_connection_information["ip"]), data);
+        }
+        catch (int e) {
+            cout << "[!] Error sending the ICMP packet in to finish connection error : " << e;
+            return false; // this mean it wasn't able to send the packet 
+        };
+
+
+        return true; // this mean it was able to send the packet
     }
 
 };
@@ -560,7 +609,7 @@ std:cout << "[+] ICMP listener started... Waiting for packets." << std::endl;
         std::cout << "\n[ICMP RECEIVED] From: " << inet_ntoa(sender.sin_addr) << " | Payload: " << payload_str;
 
         // === send the packet to the main thread.
-        std::lock_guard<std::mutex> lock(icmp_mutex);
+        std::lock_guard<std::mutex> lock();
         string full_payload = payload_str + SPLIT + inet_ntoa(sender.sin_addr);
         icmp_packet_queue.emplace(full_payload);
         icmp_cv.notify_one(); // Notify main thread
@@ -571,10 +620,25 @@ std:cout << "[+] ICMP listener started... Waiting for packets." << std::endl;
 
 }
 
+/// <summary>
+/// Okay, this will be use to interact with the TCP connection. We should be able to send connection etc. from here. 
+/// so next time we will copy something similar to what I did in the listener to send information to the main thread to send it to the apropriate icmp_tcp object
+/// once this is done we will just have to handle what happen if packet are not deliver, ttl etc. shouldn't be too hard. 
+/// Maybe clean this up by making more than one file (using the header.) 'cause you know your dumb but stay clean
+/// </summary>
+void send_command() {
+
+
+    while (true) {
+        std::string input;
+        std::cout << "Enter some text: ";
+        std::getline(std::cin, input);  // Reads a whole line including spaces
+        std::cout << "You entered: " << input << std::endl;
+    }
+}
 
 
 int main() {
-
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         std::cerr << "WSAStartup failed." << std::endl;
@@ -586,14 +650,13 @@ int main() {
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
     std::vector<icmp_tcp> all_active_connection;
-
     
+    std::thread command_thread(send_command);
 
-    icmp_tcp t = icmp_tcp("127.0.0.1");
 
-    t.start_connection();
-    
-    all_active_connection.push_back(t);
+    all_active_connection.push_back(icmp_tcp("127.0.0.1",true));
+
+    all_active_connection[all_active_connection.size()-1].start_connection();
 
 
     while (true) {
